@@ -2,15 +2,15 @@ import torch
 import torch.nn as nn
 
 class DoubleConv(nn.Module):
-    def __init__(self, in_channels, out_channels, mid_channels):
-        super(DoubleConv, self).__init__()
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias = False),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias = False),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
@@ -20,7 +20,7 @@ class DoubleConv(nn.Module):
 
 class DownLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(DownLayer, self).__init__()
+        super().__init__()
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool2d(2, 1),
             DoubleConv(in_channels, out_channels)
@@ -30,8 +30,8 @@ class DownLayer(nn.Module):
         return self.maxpool_conv(X)
 
 class UpLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, bilinear):
-        super(UpLayer, self).__init__()
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)

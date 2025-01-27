@@ -7,21 +7,21 @@ from unet.unet_parts import *
 class UNET(nn.Module):
     def __init__(self, n_channels, n_classes, bilinear) -> None:
         super(UNET, self).__init__()
-        self.n_classes = n_classes
         self.n_channels = n_channels
+        self.n_classes = n_classes
         self.bilinear = bilinear
-        self.factor = 2 if self.bilinear else 1
+        factor = 2 if self.bilinear else 1
 
         self.inp = DoubleConv(n_channels, 64)
         self.down1 = DownLayer(64, 128)
         self.down2 = DownLayer(128, 256)
         self.down3 = DownLayer(256, 512)
-        self.down4 = DownLayer(512, 1024 // self.factor)
+        self.down4 = DownLayer(512, 1024 // factor)
 
-        self.up1 = UpLayer(1024, 512 // self.factor, bilinear)
-        self.up2 = UpLayer(512, 256 // self.factor, bilinear)
-        self.up3 = UpLayer(256, 128 // self.factor, bilinear)
-        self.up4 = UpLayer(128, 64 // self.factor, bilinear)
+        self.up1 = UpLayer(1024, 512 // factor, bilinear)
+        self.up2 = UpLayer(512, 256 // factor, bilinear)
+        self.up3 = UpLayer(256, 128 // factor, bilinear)
+        self.up4 = UpLayer(128, 64 // factor, bilinear)
         self.out = OutConv(64, n_classes)
         
 
