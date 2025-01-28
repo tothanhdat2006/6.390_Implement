@@ -1,7 +1,3 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 from unet.unet_parts import *
 
 class UNET(nn.Module):
@@ -26,24 +22,24 @@ class UNET(nn.Module):
         
 
     def contracting_path(self, X):
-        out1 = self.down1(X) # 280 x 280
-        out2 = self.down2(X) # 136 x 136
-        out3 = self.down3(X) # 64 x 64
-        out4 = self.down4(X) # 28 x 28
-        return out1, out2, out3, out4, X
+        out1 = self.down1(X) # 128 x 280 x 280
+        out2 = self.down2(out1) # 256 x 136 x 136
+        out3 = self.down3(out2) # 512 x 64 x 64
+        out4 = self.down4(out3) # 1024 x 28 x 28
+        return out1, out2, out3, out4
     
-    def expansive_path(self, X, c4, c3, c2, c1):
-        X = self.up1(X, c4) # 52 x 52
-        X = self.up2(X, c3) # 100 x 100
-        X = self.up3(X, c2) # 196 x 196
-        X = self.up4(X, c1) # 388 x 388
-        return X
+    def expansive_path(self, c4, c3, c2, c1, c0):
+        out = self.up1(c0, c4) # 512 x 52 x 52
+        out = self.up2(out, c3) # 256 x 100 x 100
+        out = self.up3(out, c2) # 128 x 196 x 196
+        out = self.up4(out, c1) # 64 x 388 x 388
+        return out
     
     def forward(self, X):
-        X = self.inp(X) # 568 x 568
-        c1, c2, c3, c4, X = self.contracting_path(X)
-        X = self.expansive_path(X, c4, c3, c2, c1)
-        logits = self.out(X)
+        c0 = self.inp(X) # 64 x 568 x 568
+        c1, c2, c3, c4 = self.contracting_path(c0)
+        e = self.expansive_path(c4, c3, c2, c1, c0)
+        logits = self.out(e) # 2 x 388 x 388
         return logits
     
     def use_checkpointing(self):
