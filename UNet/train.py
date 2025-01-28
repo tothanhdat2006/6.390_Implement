@@ -1,19 +1,19 @@
-import os
-from pathlib import Path
 import logging
 from tqdm import tqdm
 import wandb
-import matplotlib.pyplot as plt
 import argparse
 
+import os
 import numpy as np
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import random_split, DataLoader
+
 from evaluate import evaluate
 from unet.unet import UNET
 from utils.load_data import ImageCustomDataset, MaskCustomDataset
-from torch.utils.data import random_split, DataLoader
 from utils.dice_score import dice_loss
 
 dir_images = Path('./data/imgs')
