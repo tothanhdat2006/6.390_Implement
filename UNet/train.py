@@ -28,7 +28,7 @@ def train_model(
         learning_rate: float = 1e-5,
         val_percent: float = 0.,
         save_checkpoint: bool = True,
-        img_scale: float = 0.5,
+        img_scale: float = 0.3,
         amp: bool = True,
         weight_decay: float = 1e-8,
         momentum: float = 0.99,
@@ -79,63 +79,72 @@ def train_model(
         torch.cuda.empty_cache()
         model.train() # Set model to training mode
         epoch_loss = 0
-        for batch in train_dataloader:
-            images, masks_true = batch['image'], batch['mask']
-            images = images.to(device, dtype=torch.float32, memory_format=torch.channels_last)
-            masks_true = masks_true.to(device, dtype = torch.long)
-            
-            with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                masks_pred = model(images)
-                if model.n_classes == 1:
-                    loss = criterion(masks_pred.squeeze(1), masks_true.float())
-                    loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), masks_true.float(), multiclass=False)
-                else:
-                    loss = criterion(masks_pred, masks_true)
-                    loss += dice_loss(
-                        nn.functional.softmax(masks_pred, dim = 1).float(), 
-                        nn.functional.one_hot(masks_true, model.n_classes).permute(0, 3, 1, 2).float(), 
-                        multiclass=True
-                    )
+        with tqdm(total=n_train, desc=f'Epoch {epoch}/{n_epochs}', unit='img') as pbar:
+          for batch in train_dataloader:
+              images, masks_true = batch['image'], batch['mask']
+              images = images.to(device, dtype=torch.float32, memory_format=torch.channels_last)
+              masks_true = masks_true.to(device, dtype = torch.long)
+              
+              with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
+                  masks_pred = model(images)
+                  if model.n_classes == 1:
+                      loss = criterion(masks_pred.squeeze(1), masks_true.float())
+                      loss += dice_loss(nn.functional.sigmoid(masks_pred.squeeze(1)), masks_true.float(), multiclass=False)
+                  else:
+                      loss = criterion(masks_pred, masks_true)
+                      loss += dice_loss(
+                          nn.functional.softmax(masks_pred, dim = 1).float(), 
+                          nn.functional.one_hot(masks_true, model.n_classes).permute(0, 3, 1, 2).float(), 
+                          multiclass=True
+                      )
 
-            optimizer.zero_grad()
-            grad_scaler.scale(loss).backward()
-            grad_scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            grad_scaler.step(optimizer)
-            grad_scaler.update()
+              optimizer.zero_grad()
+              grad_scaler.scale(loss).backward()
+              grad_scaler.unscale_(optimizer)
+              nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+              grad_scaler.step(optimizer)
+              grad_scaler.update()
 
-            epoch_loss += loss.item()
+              pbar.update(images.shape[0])
+              global_step += 1
+              epoch_loss += loss.item()
+              experiment.log({
+                  'train loss': loss.item(),
+                  'step': global_step,
+                  'epoch': epoch
+              })
+              pbar.set_postfix(**{'loss (batch)': loss.item()})
 
-            division_step = (n_train // (5 * batch_size))
-            if division_step > 0:
-                if global_step % division_step == 0:
-                    histograms = {}
-                    for tag, value in model.named_parameters():
-                        tag = tag.replace('/', '.')
-                        if not (torch.isinf(value) | torch.isnan(value)).any():
-                            histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                        if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
-                            histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+              division_step = (n_train // (5 * batch_size))
+              if division_step > 0:
+                  if global_step % division_step == 0:
+                      histograms = {}
+                      for tag, value in model.named_parameters():
+                          tag = tag.replace('/', '.')
+                          if not (torch.isinf(value) | torch.isnan(value)).any():
+                              histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                          if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                              histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
-                    val_score = evaluate(model, val_dataloader, device, amp)
-                    scheduler.step(val_score)
+                      val_score = evaluate(model, val_dataloader, device, amp)
+                      scheduler.step(val_score)
 
-                    logging.info('Validation Dice score: {}'.format(val_score))
-                    try:
-                        experiment.log({
-                            'learning rate': optimizer.param_groups[0]['lr'],
-                            'validation Dice': val_score,
-                            'images': wandb.Image(images[0].cpu()),
-                            'masks': {
-                                'true': wandb.Image(masks_true[0].float().cpu()),
-                                'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
-                            },
-                            'step': global_step,
-                            'epoch': epoch,
-                            **histograms
-                        })
-                    except:
-                        pass
+                      logging.info('Validation Dice score: {}'.format(val_score))
+                      try:
+                          experiment.log({
+                              'learning rate': optimizer.param_groups[0]['lr'],
+                              'validation Dice': val_score,
+                              'images': wandb.Image(images[0].cpu()),
+                              'masks': {
+                                  'true': wandb.Image(masks_true[0].float().cpu()),
+                                  'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+                              },
+                              'step': global_step,
+                              'epoch': epoch,
+                              **histograms
+                          })
+                      except:
+                          pass
 
         if save_checkpoint:
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
@@ -152,7 +161,7 @@ def get_args():
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
-    parser.add_argument('--scale', '-s', type=float, default=0.5, help='Downscaling factor of the images')
+    parser.add_argument('--scale', '-s', type=float, default=0.3, help='Downscaling factor of the images')
     parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
                         help='Percent of the data that is used as validation (0-100)')
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
@@ -191,5 +200,15 @@ if __name__ == "__main__":
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
         torch.cuda.empty_cache()
-        print(f"Not enough memory")
+        model.use_checkpointing()
+        train_model(
+            model=model,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            device=device,
+            img_scale=args.scale,
+            val_percent=args.val / 100,
+            amp=args.amp
+        )
     

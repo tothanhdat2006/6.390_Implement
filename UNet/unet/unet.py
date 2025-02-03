@@ -1,4 +1,5 @@
 from unet.unet_parts import *
+from torch.utils.checkpoint import checkpoint
 
 class UNET(nn.Module):
     def __init__(self, n_channels, n_classes) -> None:
@@ -38,3 +39,15 @@ class UNET(nn.Module):
         e = self.expansive_path(c4, c3, c2, c1, c0)
         logits = self.out(e) # 2 x 388 x 388
         return logits
+    
+    def use_checkpointing(self):
+      self.inp = torch.utils.checkpoint.checkpoint(self.inp)
+      self.down1 = torch.utils.checkpoint.checkpoint(self.down1)
+      self.down2 = torch.utils.checkpoint.checkpoint(self.down2)
+      self.down3 = torch.utils.checkpoint.checkpoint(self.down3)
+      self.down4 = torch.utils.checkpoint.checkpoint(self.down4)
+      self.up1 = torch.utils.checkpoint.checkpoint(self.up1)
+      self.up2 = torch.utils.checkpoint.checkpoint(self.up2)
+      self.up3 = torch.utils.checkpoint.checkpoint(self.up3)
+      self.up4 = torch.utils.checkpoint.checkpoint(self.up4)
+      self.out = torch.utils.checkpoint.checkpoint(self.out)
