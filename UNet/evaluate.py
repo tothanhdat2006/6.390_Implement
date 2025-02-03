@@ -10,7 +10,8 @@ def evaluate(model, dataloader, device, amp):
     test_loss = 0.0
 
     with torch.no_grad():
-        for images, masks_true in dataloader:
+        for batch in dataloader:
+            images, masks_true = batch['image'], batch['mask']
             images = images.to(device, dtype=torch.float32, memory_format=torch.channels_last)
             masks_true = masks_true.to(device, dtype = torch.long)
             masks_pred = model(images)

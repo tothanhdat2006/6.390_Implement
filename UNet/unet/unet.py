@@ -26,10 +26,10 @@ class UNET(nn.Module):
         return out1, out2, out3, out4
     
     def expansive_path(self, c4, c3, c2, c1, c0):
-        out = self.up1(c0, c4) # 512 x 52 x 52
-        out = self.up2(out, c3) # 256 x 100 x 100
-        out = self.up3(out, c2) # 128 x 196 x 196
-        out = self.up4(out, c1) # 64 x 388 x 388
+        out = self.up1(c4, c3) # 512 x 52 x 52
+        out = self.up2(out, c2) # 256 x 100 x 100
+        out = self.up3(out, c1) # 128 x 196 x 196
+        out = self.up4(out, c0) # 64 x 388 x 388
         return out
     
     def forward(self, X):
