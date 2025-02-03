@@ -18,6 +18,7 @@ from utils.dice_score import dice_loss
 
 dir_images = Path('./data/imgs')
 dir_masks = Path('./data/masks')
+dir_checkpoint = Path('./checkpoints/')
 
 def train_model(
         model, 
@@ -68,8 +69,9 @@ def train_model(
     ''')
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
-    loss_func = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)
+    grad_scaler = torch.GradScaler(enabled=amp)
     global_step = 0
 
     # 5. Begin training
@@ -77,6 +79,70 @@ def train_model(
         torch.cuda.empty_cache()
         model.train() # Set model to training mode
         epoch_loss = 0
+        for images, masks_true in train_dataloader:
+            images = images.to(device, dtype=torch.float32, memory_format=torch.channels_last)
+            masks_true = masks_true.to(device, dtype = torch.long)
+            
+            with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
+                masks_pred = model(images)
+                if model.n_classes == 1:
+                    loss = criterion(masks_pred.squeeze(1), masks_true.float())
+                    loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), masks_true.float(), multiclass=False)
+                else:
+                    loss = criterion(masks_pred, masks_true)
+                    loss += dice_loss(
+                        nn.functional.softmax(masks_pred, dim = 1).float(), 
+                        nn.functional.softmax(masks_true, model.n_classes).permute(0, 3, 1, 2).float(), 
+                        multiclass=True
+                    )
+
+            optimizer.zero_grad()
+            grad_scaler.scale(loss).backward()
+            grad_scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+
+            epoch_loss += loss.item()
+
+            division_step = (n_train // (5 * batch_size))
+            if division_step > 0:
+                if global_step % division_step == 0:
+                    histograms = {}
+                    for tag, value in model.named_parameters():
+                        tag = tag.replace('/', '.')
+                        if not (torch.isinf(value) | torch.isnan(value)).any():
+                            histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                        if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                            histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+
+                    val_score = evaluate(model, val_dataloader, device, amp)
+                    scheduler.step(val_score)
+
+                    logging.info('Validation Dice score: {}'.format(val_score))
+                    try:
+                        experiment.log({
+                            'learning rate': optimizer.param_groups[0]['lr'],
+                            'validation Dice': val_score,
+                            'images': wandb.Image(images[0].cpu()),
+                            'masks': {
+                                'true': wandb.Image(masks_true[0].float().cpu()),
+                                'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+                            },
+                            'step': global_step,
+                            'epoch': epoch,
+                            **histograms
+                        })
+                    except:
+                        pass
+
+        if save_checkpoint:
+            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+            state_dict = model.state_dict()
+            state_dict['mask_values'] = dataset.mask_values
+            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+            logging.info(f'Checkpoint {epoch} saved!')
+            
         
 
 
