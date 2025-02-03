@@ -79,7 +79,8 @@ def train_model(
         torch.cuda.empty_cache()
         model.train() # Set model to training mode
         epoch_loss = 0
-        for images, masks_true in train_dataloader:
+        for batch in train_dataloader:
+            images, masks_true = batch['image'], batch['mask']
             images = images.to(device, dtype=torch.float32, memory_format=torch.channels_last)
             masks_true = masks_true.to(device, dtype = torch.long)
             
@@ -141,9 +142,7 @@ def train_model(
             state_dict = model.state_dict()
             state_dict['mask_values'] = dataset.mask_values
             torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
-            logging.info(f'Checkpoint {epoch} saved!')
-            
-        
+            logging.info(f'Checkpoint {epoch} saved!')            
 
 
 def get_args():
