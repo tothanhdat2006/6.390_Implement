@@ -20,24 +20,17 @@ class ResidualBlock(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, X):
-        print("-----Enter residual block-----")
         shortcut = X.clone()
 
         X = self.conv1(X)
-        print(f'After conv1: {X.size()}')
         X = self.batch_norm1(X)
         X = self.relu(X)
 
         X = self.conv2(X)
-        print(f'After conv2: {X.size()}')
         X = self.batch_norm2(X)
-        print(f' shortcut size = {shortcut.size()}')
-        print(f' shortcut size (down) = {self.downsample(shortcut).size()}')
         X += self.downsample(shortcut)
-        print(f'After downsample: {X.size()}')
         X = self.relu(X)
         
-        print("-----Leave residual block-----")
         return X
 
 
@@ -71,15 +64,11 @@ class ResNet(nn.Module):
     def forward(self, X):
         print(X.size())
         X = self.conv1(X)
-        print(f'After conv1: {X.size()}')
         X = self.batch_norm1(X)
         X = self.maxpool(X)
-        print(f'After maxpool: {X.size()}')
         X = self.relu(X)
 
         X = self.conv2_x(X)
-        print(f'After conv2_x: {X.size()}')
-        print(self.conv3_x)
         X = self.conv3_x(X)
         X = self.conv4_x(X)
         X = self.conv5_x(X)

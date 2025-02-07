@@ -39,7 +39,7 @@ def train_model(
     '''
     
     # 1. Load data
-    classes_dict, train_dataloader, val_dataloader = load_data(dir_data='data', batch_size=batch_size, num_workers=0, val_percent=0.2)
+    classes_dict, train_dataloader, val_dataloader = load_data(dir_data='data', batch_size=batch_size, num_workers=0, val_percent=val_percent)
     
     # experiment = wandb.init(project='ResNet', resume='allow')
     # experiment.config.update(
@@ -60,12 +60,13 @@ def train_model(
     # 2. Set up optimizer, loss function, learning rate scheduler
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum) 
     criterion = nn.CrossEntropyLoss()
+    global_step = 0
 
     # 3. Begin training
     train_losses = []
     val_losses = []
     for epoch in range(1, n_epochs+1):
-        batch_train_losses = []
+        epoch_loss = []
         model.train()
         with tqdm(total=len(train_dataloader), desc=f'Epoch {epoch}/{n_epochs}', unit='img') as pbar:
             for idx, (image, label) in enumerate(train_dataloader):
@@ -86,9 +87,9 @@ def train_model(
                 #     'epoch': epoch
                 # })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-                batch_train_losses.append(loss.item())
+                epoch_loss.append(loss.item())
                 
-        train_losses.append(sum(batch_train_losses) / len(batch_train_losses))
+        train_losses.append(sum(epoch_loss) / len(train_dataloader))
         val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
         print(f'Training loss: {train_losses[-1]}, Validation loss: {val_loss}, Validation accuracy: {val_acc}')
 
@@ -102,7 +103,7 @@ def get_args():
     parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
                         help='Percent of the data that is used as validation (0-100)')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from .pth file')
-    parser.add_argument('--classes', '-c', dest='classes', metavar='C', type=int, default=2, help='Number of classes')
+    parser.add_argument('--classes', '-c', dest='classes', metavar='C', type=int, default=75, help='Number of classes')
     return parser.parse_args()
 
 
@@ -114,6 +115,7 @@ if __name__ == "__main__":
     model = ResNet(residual_block=ResidualBlock, 
                    n_blocks_list=n_blocks_list,
                    n_classes=args.classes)
+    model = model.to(memory_format = torch.channels_last)
     logging.info(f'Model trained on {args.classes} classes\n'
                  f'Number of blocks per conv:\n'
                  f'\t{n_blocks_list[0]} for conv2_x\n'
