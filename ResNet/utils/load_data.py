@@ -1,6 +1,6 @@
 import os
 
-import cv2
+from PIL import Image
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import torchvision.transforms as transforms
@@ -20,10 +20,10 @@ class CustomDataset(Dataset):
         # Get image path and label from the CSV file
         filepath = self.filepaths[idx]
         label = self.labels[idx]
-        image = cv2.imread(filepath).convert("RGB")
+        image = Image.open(filepath).convert('RGB')
 
         if self.transform:
-            image = self.transform(image).permute(2, 0, 1).float()
+            image = self.transform(image)
 
         return image, label
 
@@ -82,10 +82,10 @@ def load_data(dir_data: str, val_percent: int = 0.2, batch_size: int = 1, num_wo
 
     # Define transformation for image
     transform = transforms.Compose([
+        transforms.ToTensor(),
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p = 0.5),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        transforms.ToTensor(),
     ])
 
     train_dataset = CustomDataset(dir_train, X_train, y_train, transform=transform)
