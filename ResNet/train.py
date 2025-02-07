@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
+from utils.load_data import load_data
 from resnet.resnet import ResNet, ResidualBlock
 
 def train_model(
@@ -34,6 +35,11 @@ def train_model(
     momentum: 0.9
     dropout: no
     '''
+    
+    # 1. Load data
+    classes_dict, train_dataloader, val_dataloader = load_data(dir_data='data', batch_size=batch_size, num_workers=0, val_percent=0.2)
+    
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train ResNet')
@@ -45,21 +51,33 @@ def get_args():
     return parser.parse_args()
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     print('Training...')
     args = get_args()
 
+    n_blocks_list = [2, 2, 2, 2]
     model = ResNet(residual_block=ResidualBlock, 
-                   n_blocks_list=[2, 2, 2, 2],
+                   n_blocks_list=n_blocks_list,
                    n_classes=args.classes)
-    logging.info(f'Model trained on {args.classes} classes\n'
-                 f'Number of blocks per conv:\n'
-                 f'\t{n_blocks_list[0]} for conv2_x\n'
-                 f'\t{n_blocks_list[1]} for conv3_x\n'
-                 f'\t{n_blocks_list[2]} for conv4_x\n'
-                 f'\t{n_blocks_list[3]} for conv5_x\n')
+    # logging.info(f'Model trained on {args.classes} classes\n'
+    #              f'Number of blocks per conv:\n'
+    #              f'\t{n_blocks_list[0]} for conv2_x\n'
+    #              f'\t{n_blocks_list[1]} for conv3_x\n'
+    #              f'\t{n_blocks_list[2]} for conv4_x\n'
+    #              f'\t{n_blocks_list[3]} for conv5_x\n')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Using device: {device}')
+    # logging.info(f'Using device: {device}')
     model.to(device=device)
+    try:
+        train_model(model,
+                    device,
+                    n_epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.lr)
+    except torch.cuda.OutOfMemoryError:
+        logging.error('Detected OutOfMemoryError! '
+                      'Enabling checkpointing to reduce memory usage, but this slows down training.')
+        torch.cuda.empty_cache()
+        print("Not enough memory to train model")
     
