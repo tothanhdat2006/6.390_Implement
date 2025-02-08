@@ -2,6 +2,7 @@ import argparse
 import wandb
 import logging
 from tqdm import tqdm 
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,8 @@ from torch.utils.data import DataLoader
 from utils.load_data import load_data
 from evaluate import evaluate
 from resnet.resnet import ResNet, ResidualBlock
+
+dir_checkpoint = Path('./checkpoints/')
 
 def train_model(
     model,
@@ -41,11 +44,11 @@ def train_model(
     # 1. Load data
     classes_dict, train_dataloader, val_dataloader = load_data(dir_data='data', batch_size=batch_size, num_workers=0, val_percent=val_percent)
     
-    # experiment = wandb.init(project='ResNet', resume='allow')
-    # experiment.config.update(
-    #     dict(n_epochs=n_epochs, batch_size=batch_size, learning_rate=learning_rate,
-    #          val_percent=val_percent, save_checkpoint=save_checkpoint)
-    # )
+    experiment = wandb.init(project='ResNet', resume='allow')
+    experiment.config.update(
+        dict(n_epochs=n_epochs, batch_size=batch_size, learning_rate=learning_rate,
+             val_percent=val_percent, save_checkpoint=save_checkpoint)
+    )
 
     logging.info(f'''Starting training:
         Epochs:          {n_epochs}
@@ -60,17 +63,21 @@ def train_model(
     # 2. Set up optimizer, loss function, learning rate scheduler
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum) 
     criterion = nn.CrossEntropyLoss()
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)
     global_step = 0
 
     # 3. Begin training
     train_losses = []
     val_losses = []
+    best_val_loss = float('inf')
     for epoch in range(1, n_epochs+1):
-        epoch_loss = []
+        epoch_loss = 0
         model.train()
         with tqdm(total=len(train_dataloader), desc=f'Epoch {epoch}/{n_epochs}', unit='img') as pbar:
-            for idx, (image, label) in enumerate(train_dataloader):
-                image, label = image.to(device), label.to(device)
+            for batch in train_dataloader:
+                image, label = batch['image'], batch['label']
+                image = image.to(device, dtype=torch.float32, memory_format=torch.channels_last)
+                label = label.to(device, dtype=torch.long)
 
                 optimizer.zero_grad()
                 label_pred = model(image)
@@ -81,18 +88,31 @@ def train_model(
                 pbar.update(image.shape[0])
                 global_step += 1
                 epoch_loss += loss.item()
-                # experiment.log({
-                #     'train loss': loss.item(),
-                #     'step': global_step,
-                #     'epoch': epoch
-                # })
+                experiment.log({
+                    'train loss': loss.item(),
+                    'step': global_step,
+                    'epoch': epoch
+                })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-                epoch_loss.append(loss.item())
                 
-        train_losses.append(sum(epoch_loss) / len(train_dataloader))
-        val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
-        print(f'Training loss: {train_losses[-1]}, Validation loss: {val_loss}, Validation accuracy: {val_acc}')
+                histograms = {}
+                for tag, value in model.named_parameters():
+                    tag = tag.replace('/', '.')
+                    if not (torch.isinf(value) | torch.isnan(value)).any():
+                        histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                    if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                        histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
+                val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
+                scheduler.step(val_loss)
+                val_losses.append(val_loss)
+
+        if val_losses[-1] < best_val_loss:  # Check for improvement
+            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)  # Ensure dir exists
+            state_dict = model.state_dict()
+            torch.save(state_dict, str(dir_checkpoint / f'checkpoint_ResNet_epoch{epoch}.pth'))
+            logging.info(f'Checkpoint saved! Validation loss improved from {best_val_loss:.4f} to {val_losses[-1]:.4f}')
+            best_val_loss = val_losses[-1]
 
 
 def get_args():
@@ -125,6 +145,7 @@ if __name__ == "__main__":
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device: {device}')
+    print(f'Using device: {device}')
     model.to(device=device)
     try:
         train_model(model,
