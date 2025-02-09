@@ -1,15 +1,13 @@
 import os
-
+from pathlib import Path
 import numpy as np
 from PIL import Image
-import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+from torch.utils.data import Dataset, DataLoader
 
 class CustomDataset(Dataset):
-    def __init__(self, dir_images: str, filepaths: list, labels: list, transform=None):
-        self.dir_images = dir_images
+    def __init__(self, filepaths: list, labels: list, transform=None):
         self.filepaths = filepaths
         self.labels = labels
         self.transform = transform
@@ -18,7 +16,6 @@ class CustomDataset(Dataset):
         return len(self.filepaths)
 
     def __getitem__(self, idx: int):
-        # Get image path and label from the CSV file
         filepath = self.filepaths[idx]
         label = self.labels[idx]
         image = Image.open(filepath)
@@ -27,80 +24,87 @@ class CustomDataset(Dataset):
             image = self.transform(image)
 
         return {
-          'image': torch.as_tensor(image.copy()).float().contiguous(),
-          'label': torch.as_tensor(label).long().contiguous()
+            'image': torch.as_tensor(image.copy()).float().contiguous(),
+            'label': torch.as_tensor(label).long().contiguous()
         }
 
-
-def encode_labels(labels):
-    """
-    Encode categorical labels into numeric values.
-
-    Args:
-        labels (list): List of categorical labels.
-    Returns:
-        tuple: A tuple (label_to_index, numeric_labels) where:
-            - label_to_index (dict): Mapping from label to numeric value.
-            - numeric_labels (list): List of numeric labels corresponding to the input labels.
-    """
-    unique_labels = sorted(set(labels))
-    label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
-    numeric_labels = [label_to_index[label] for label in labels]
-    return label_to_index, numeric_labels
-
-
 def transform(img, img_size=(224, 224)):
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
     img = img.resize(img_size, resample=Image.BICUBIC)
     img = np.asarray(img)
-    if img.ndim == 2:
-        img = img[np.newaxis, ...] # Add channel for black and white image 
-    else:
-        img = img.transpose((2, 0, 1)) # Convert BGR to RGB
+
+    img = img.transpose((2, 0, 1))  # Convert HWC to CHW format
     
     if (img > 1).any():
-        img = img / 255.0 # Standardize
+        img = img / 255.0  # Normalize to [0,1]
     
     return img
 
-def load_data(dir_data: str, val_percent: int = 0.2, batch_size: int = 1, num_workers: int = 0) -> dict | DataLoader | DataLoader:
+def load_data(dir_data: str, val_percent: float = 0.2, batch_size: int = 1, num_workers: int = 0):
     '''
-    Load data from directory. Expects the following structure:
-      dir_data/
-          train/
-          class.csv   (columns: filename, label class)
+    Load data from directory structure:
+    dir_data/
+        train/
+            class1/
+                img1.*
+                img2.*
+            class2/
+                img1.*
+                img2.*
+            ...
 
     Args:
-        dir_data (str): Path to the data directory.
-        val_percent (int): Percentage of validation data.
-        batch_size (int): Batch size for DataLoader.
-        num_workers (int): Number of workers for DataLoader.
+        dir_data (str): Path to the data directory
+        val_percent (float): Fraction of data to use for validation
+        batch_size (int): Batch size for DataLoader
+        num_workers (int): Number of workers for DataLoader
+
     Returns:
-        dict: Mapping from label to index.
-        DataLoader: DataLoader for training data.
-        DataLoader: DataLoader for validation data.
+        dict: Mapping from class names to indices
+        DataLoader: Training data loader
+        DataLoader: Validation data loader
     '''
-
-    # Define paths
-    dir_csv = os.path.join(dir_data, 'class.csv')
-    dir_train = os.path.join(dir_data, 'train')
-
-    # Read class names from class.csv
-    class_csv = pd.read_csv(dir_csv)
+    train_dir = Path(dir_data) / 'train'
     filepaths = []
     labels = []
-    for i in range(len(class_csv)):
-        filepaths.append(os.path.join(dir_train, class_csv['filename'][i]))
-        labels.append(class_csv['label'][i])
-
-    labels_dict, labels_encoded = encode_labels(labels)
-
-    # Split data into training set and validation set
-    X_train, X_val, y_train, y_val = train_test_split(filepaths, labels_encoded, test_size=val_percent, random_state=86)
-
-    train_dataset = CustomDataset(dir_train, X_train, y_train, transform=transform)
-    val_dataset = CustomDataset(dir_train, X_val, y_val, transform=transform)
     
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+    # Get class folders
+    class_folders = [cls for cls in train_dir.iterdir() if cls.is_dir()]
+    class_to_idx = {folder.name: idx for idx, folder in enumerate(sorted(class_folders))}
     
-    return labels_dict, train_dataloader, val_dataloader
+    # Collect all image paths and their labels
+    for class_folder in class_folders:
+        class_label = class_to_idx[class_folder.name]
+        for img_path in class_folder.glob('*'):
+            if img_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.bmp', '.tiff'):
+                filepaths.append(str(img_path))
+                labels.append(class_label)
+
+    # Split into train and validation sets
+    X_train, X_val, y_train, y_val = train_test_split(
+        filepaths, labels, 
+        test_size=val_percent, 
+        random_state=86, 
+        stratify=labels
+    )
+
+    # Create datasets
+    train_dataset = CustomDataset(X_train, y_train, transform=transform)
+    val_dataset = CustomDataset(X_val, y_val, transform=transform)
+    
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False
+    )
+    
+    return class_to_idx, train_loader, val_loader

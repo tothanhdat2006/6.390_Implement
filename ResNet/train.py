@@ -70,6 +70,7 @@ def train_model(
     train_losses = []
     val_losses = []
     n_train = len(train_dataloader)
+    division_step = (n_train // (5 * batch_size))
     best_val_loss = float('inf')
     for epoch in range(1, n_epochs+1):
         epoch_loss = 0.0
@@ -96,10 +97,13 @@ def train_model(
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
                 
+                if division_step > 0:
+                    if global_step % division_step == 0:
+                        val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
+                        scheduler.step(val_loss)
+                        val_losses.append(val_loss)
+
         train_losses.append(epoch_loss / n_train)
-        val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
-        scheduler.step(val_loss)
-        val_losses.append(val_loss)
         print(f"Epoch {epoch}: Training Loss = {train_losses[-1]}, Validation Loss = {val_losses[-1]}")
         if val_losses[-1] < best_val_loss:  # Check for improvement
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)  # Ensure dir exists
@@ -114,7 +118,7 @@ def get_args():
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
     parser.add_argument('--learning-rate', '-l', dest='lr', metavar='LR', type=float, default=1e-5, help='Learning rate')
-    parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
+    parser.add_argument('--validation', '-v', dest='val', type=float, default=20.0,
                         help='Percent of the data that is used as validation (0-100)')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from .pth file')
     parser.add_argument('--classes', '-c', dest='classes', metavar='C', type=int, default=75, help='Number of classes')
