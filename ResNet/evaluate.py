@@ -1,7 +1,4 @@
 import torch
-from torchvision import datasets, transforms
-
-import torch.nn as nn
 
 def evaluate(model, dataloader, criterion, device):
     model.eval()
@@ -9,8 +6,10 @@ def evaluate(model, dataloader, criterion, device):
     total = 0
     losses = []
     with torch.no_grad():
-        for image, label in dataloader:
-            image, label = image.to(device), label.to(device)
+        for batch in dataloader:
+            image, label = batch['image'], batch['label']
+            image = image.to(device, dtype=torch.float32, memory_format=torch.channels_last)
+            label = label.to(device, dtype=torch.long)
             label_pred = model(image)
             loss = criterion(label_pred, label)
             losses.append(loss.item())
@@ -20,4 +19,5 @@ def evaluate(model, dataloader, criterion, device):
 
     avg_loss = sum(losses) / len(losses)
     accuracy = correct / total
+    model.train()
     return avg_loss, accuracy

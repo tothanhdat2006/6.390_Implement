@@ -69,11 +69,12 @@ def train_model(
     # 3. Begin training
     train_losses = []
     val_losses = []
+    n_train = len(train_dataloader)
     best_val_loss = float('inf')
     for epoch in range(1, n_epochs+1):
-        epoch_loss = 0
+        epoch_loss = 0.0
         model.train()
-        with tqdm(total=len(train_dataloader), desc=f'Epoch {epoch}/{n_epochs}', unit='img') as pbar:
+        with tqdm(total=n_train, desc=f'Epoch {epoch}/{n_epochs}', unit='img') as pbar:
             for batch in train_dataloader:
                 image, label = batch['image'], batch['label']
                 image = image.to(device, dtype=torch.float32, memory_format=torch.channels_last)
@@ -95,18 +96,11 @@ def train_model(
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
                 
-                histograms = {}
-                for tag, value in model.named_parameters():
-                    tag = tag.replace('/', '.')
-                    if not (torch.isinf(value) | torch.isnan(value)).any():
-                        histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                    if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
-                        histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
-
-                val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
-                scheduler.step(val_loss)
-                val_losses.append(val_loss)
-
+        train_losses.append(epoch_loss / n_train)
+        val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
+        scheduler.step(val_loss)
+        val_losses.append(val_loss)
+        print(f"Epoch {epoch}: Training Loss = {train_losses[-1]}, Validation Loss = {val_losses[-1]}")
         if val_losses[-1] < best_val_loss:  # Check for improvement
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)  # Ensure dir exists
             state_dict = model.state_dict()

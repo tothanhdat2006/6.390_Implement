@@ -4,9 +4,8 @@ import numpy as np
 from PIL import Image
 import pandas as pd
 from sklearn.model_selection import train_test_split
-import torchvision.transforms as transforms
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 class CustomDataset(Dataset):
     def __init__(self, dir_images: str, filepaths: list, labels: list, transform=None):
@@ -28,8 +27,8 @@ class CustomDataset(Dataset):
             image = self.transform(image)
 
         return {
-          'image': torch.as_tensor(image).float().contiguous(),
-          'label': torch.as_tensor(label).int().contiguous()
+          'image': torch.as_tensor(image.copy()).float().contiguous(),
+          'label': torch.as_tensor(label).long().contiguous()
         }
 
 
@@ -51,12 +50,17 @@ def encode_labels(labels):
 
 
 def transform(img, img_size=(224, 224)):
-    img = img.resize(img_size)
-    img = np.array(img)[..., :3]
-    img = torch.tensor(img).permute(2, 0, 1).float()
-    normalized_img = img / 255.0
-
-    return normalized_img
+    img = img.resize(img_size, resample=Image.BICUBIC)
+    img = np.asarray(img)
+    if img.ndim == 2:
+        img = img[np.newaxis, ...] # Add channel for black and white image 
+    else:
+        img = img.transpose((2, 0, 1)) # Convert BGR to RGB
+    
+    if (img > 1).any():
+        img = img / 255.0 # Standardize
+    
+    return img
 
 def load_data(dir_data: str, val_percent: int = 0.2, batch_size: int = 1, num_workers: int = 0) -> dict | DataLoader | DataLoader:
     '''
