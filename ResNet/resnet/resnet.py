@@ -62,7 +62,6 @@ class ResNet(nn.Module):
         return nn.Sequential(*blocks)
 
     def forward(self, X):
-        print(X.size())
         X = self.conv1(X)
         X = self.batch_norm1(X)
         X = self.maxpool(X)
