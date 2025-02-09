@@ -99,9 +99,33 @@ def train_model(
                 
                 if division_step > 0:
                     if global_step % division_step == 0:
+                        histograms = {}
+                        for tag, value in model.named_parameters():
+                            tag = tag.replace('/', '.')
+                            if not (torch.isinf(value) | torch.isnan(value)).any():
+                                histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                            if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                                histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+
                         val_loss, val_acc = evaluate(model, val_dataloader, criterion, device)
                         scheduler.step(val_loss)
                         val_losses.append(val_loss)
+
+                        try:
+                            experiment.log({
+                                'learning rate': optimizer.param_groups[0]['lr'],
+                                'validation Dice': val_loss,
+                                'images': wandb.Image(image[0].cpu()),
+                                'masks': {
+                                    'true': label,
+                                    'pred': label_pred.argmax(dim=1)[0].float().cpu(),
+                                },
+                                'step': global_step,
+                                'epoch': epoch,
+                                **histograms
+                            })
+                        except:
+                            pass
 
         train_losses.append(epoch_loss / n_train)
         print(f"Epoch {epoch}: Training Loss = {train_losses[-1]}, Validation Loss = {val_losses[-1]}")
